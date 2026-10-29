@@ -21,11 +21,11 @@
   "detail_width_m": 180,
   "zone_factor": 2.0,
   "zone_width_m": 360,
-  "total_orient": "auto",
-  "total_size": null,
+  "total_orient": "wide",
+  "total_size": "2120x1440",
   "total_width_m": 1100,
   "scale_auto": true,
   "base_url": "https://mt1.google.com/vt/lyrs%3Ds%26x={x}%26y={y}%26z={z}",
-  "keep_pages": false
+  "keep_pages": false,
+  "map_levels": 2
 }
-

@@ -123,6 +123,8 @@ def main():
     ap.add_argument("--total-orient", choices=["tall", "wide", "auto"], default="tall",
                     help="tall=纵向旋转（旧默认）；wide=横向总图；auto=按轨迹长轴自动选")
     ap.add_argument("--total-pad", type=float, default=1.25, help="auto/wide 时总图四周余量系数")
+    ap.add_argument("--maps", default="all",
+                    help="渲染哪几级图：all（详图+分区图+总图）| detail,total（跳过 zone，总图占右列不旋转）")
     ap.add_argument("--base-url", default=GOOGLE_URL)
     a = ap.parse_args()
 
@@ -138,13 +140,17 @@ def main():
     dw, dh = size(a.detail_size)
     zw, zh = size(a.zone_size)
 
-    # 详图/分区图中心：照片簇中心
-    clat = sum(float(m["lat"]) for m in meta_pts) / len(meta_pts)
-    clon = sum(float(m["lon"]) for m in meta_pts) / len(meta_pts)
+    # 详图/分区图中心：照片的「包围盒中心」。
+    # 不能用坐标平均值——分布不均时平均值会偏向密集一侧，边上的照片就被挤出图框
+    # （实测第 15 页 p155 落到框外 108 px，编号引线画到图框下方）。
     src = QgsCoordinateReferenceSystem("EPSG:4326")
     dst = QgsCoordinateReferenceSystem("EPSG:3857")
     xf = QgsCoordinateTransform(src, dst, QgsProject.instance())
-    center = xf.transform(QgsPointXY(clon, clat))
+    mlats = [float(m["lat"]) for m in meta_pts]
+    mlons = [float(m["lon"]) for m in meta_pts]
+    mbb = xf.transformBoundingBox(
+        QgsRectangle(min(mlons), min(mlats), max(mlons), max(mlats)))
+    center = mbb.center()
 
     # 总图中心 / 范围：整条轨迹包围盒
     lats = [p[0] for p in track_pts]
@@ -164,15 +170,20 @@ def main():
     else:
         tw, th = size(a.total_size) if a.total_size else (1000, 4545)
 
-    render(center.x(), center.y(), a.detail_width_m, dw, dh,
-           os.path.join(a.out_dir, "detail.png"), track_pts, meta_pts,
-           base_url=a.base_url, line_w=4.4, case_w=8.0, point_size=3.8)
-    render(center.x(), center.y(), a.zone_width_m, zw, zh,
-           os.path.join(a.out_dir, "zone.png"), track_pts, all_pts,
-           base_url=a.base_url, line_w=3.6, case_w=6.6, point_size=2.7)
-    render(tcenter.x(), tcenter.y(), total_w, tw, th,
-           os.path.join(a.out_dir, "total_tall.png"), track_pts, all_pts,
-           base_url=a.base_url, line_w=6.2, case_w=11.0, point_size=2.2)
+    want = [x.strip() for x in a.maps.split(",") if x.strip()]
+    do_all = "all" in want
+    if do_all or "detail" in want:
+        render(center.x(), center.y(), a.detail_width_m, dw, dh,
+               os.path.join(a.out_dir, "detail.png"), track_pts, meta_pts,
+               base_url=a.base_url, line_w=4.4, case_w=8.0, point_size=3.8)
+    if do_all or "zone" in want:
+        render(center.x(), center.y(), a.zone_width_m, zw, zh,
+               os.path.join(a.out_dir, "zone.png"), track_pts, all_pts,
+               base_url=a.base_url, line_w=3.6, case_w=6.6, point_size=2.7)
+    if do_all or "total" in want:
+        render(tcenter.x(), tcenter.y(), total_w, tw, th,
+               os.path.join(a.out_dir, "total_tall.png"), track_pts, all_pts,
+               base_url=a.base_url, line_w=6.2, case_w=11.0, point_size=2.2)
     print("total orient=%s size=%dx%d width=%.0f m" % (orient, tw, th, total_w))
 
 

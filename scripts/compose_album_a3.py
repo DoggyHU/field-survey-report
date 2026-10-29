@@ -106,7 +106,10 @@ def draw_detail_labels(dr, box, detail, meta):
             if chosen:
                 break
         if not chosen:
-            lx, ly = px + 60, py - 60
+            # 兜底：把编号圈钳到图框里，否则贴边照片的编号会画到图框外（压到下方照片区）
+            pad = label_r + 10
+            lx = min(max(px + 60, mx + pad), mx + mw - pad)
+            ly = min(max(py - 60, my + pad), my + mh - pad)
             chosen = (lx, ly, [lx - label_r - 8, ly - label_r - 8, lx + label_r + 8, ly + label_r + 8])
         lx, ly, box2 = chosen
         placed.append(box2)
@@ -143,8 +146,10 @@ def main():
 
     V = a.map_dir
     detail = load_json(os.path.join(V, "detail.json"))
-    zone = load_json(os.path.join(V, "zone.json"))
     total = load_json(os.path.join(V, "total_tall.json"))
+    # 有 zone.json（分区图）→ 三级排版；没有 → 两级排版（详图 + 总图），总图占右列、不旋转
+    zone_path = os.path.join(V, "zone.json")
+    zone = load_json(zone_path) if os.path.exists(zone_path) else None
     meta = load_json(a.meta)[:a.photos_per_page]
     if not meta:
         raise SystemExit("meta 为空，没有照片可排版。")
@@ -160,17 +165,22 @@ def main():
     if a.subtitle:
         dr.text((60, 116), a.subtitle, font=font(33), fill=(80, 80, 80, 255))
 
-    # top band
-    P1 = (60, 220, 2680, 1440)       # detail
-    P2 = (2780, 220, 2120, 930)      # zone
-    P3 = (2780, 1190, 2120, 470)     # total strip
+    # 顶栏：详图始终在左；分区图（如有）与总图占右列
+    P1 = (60, 220, 2680, 1440)       # 详图
+    if zone:
+        P2 = (2780, 220, 2120, 930)      # 分区图
+        P3 = (2780, 1190, 2120, 470)     # 总图（横条）
+    else:
+        P2 = None
+        P3 = (2780, 220, 2120, 1440)     # 总图直接占右列，横排渲染，不旋转
 
     paste_panel(page, dr, P1, os.path.join(V, "detail.png"), a.detail_title)
-    paste_panel(page, dr, P2, os.path.join(V, "zone.png"), a.zone_title)
+    if zone:
+        paste_panel(page, dr, P2, os.path.join(V, "zone.png"), a.zone_title)
 
     x, y, w, h = P3
     tot = Image.open(os.path.join(V, "total_tall.png")).convert("RGB")
-    rotated = tot.height > tot.width          # 纵向长条才旋转 90°；横向总图直接用
+    rotated = tot.height > tot.width          # 只有纵向长条才旋转；横排总图直接用
     if rotated:
         tot = tot.rotate(90, expand=True)
     rot = ImageOps.fit(tot, (w, h), method=Image.LANCZOS, centering=(0.5, 0.5))
@@ -181,23 +191,29 @@ def main():
     dr.rectangle([x + 6, y + 6, x + 340, y + 64], fill=(255, 255, 255, 242))
     dr.text((x + 20, y + 13), a.total_title, font=font(34, True), fill=(20, 20, 20, 255))
 
-    # 反索引：分区图上的详图框
-    zx, zy, zw, zh = P2
-    zx0, zx1, zy0, zy1 = zone["xmin"], zone["xmax"], zone["ymin"], zone["ymax"]
     dx0, dx1, dy0, dy1 = detail["xmin"], detail["xmax"], detail["ymin"], detail["ymax"]
-    rx0 = zx + (dx0 - zx0) / (zx1 - zx0) * zw
-    rx1 = zx + (dx1 - zx0) / (zx1 - zx0) * zw
-    ry0 = zy + (zy1 - dy1) / (zy1 - zy0) * zh
-    ry1 = zy + (zy1 - dy0) / (zy1 - zy0) * zh
-    rx0, ry0, rx1, ry1 = _clip_rect(rx0, ry0, rx1, ry1, P2)
-    dr.rectangle([rx0, ry0, rx1, ry1], outline=(235, 35, 45, 255), width=7)
 
-    # 反索引：总图上的分区图框（纵向源图旋转 90° 后显示；横向总图按原图坐标）
+    # 反索引（三级）：分区图上标出本幅详图范围
+    if zone:
+        zx, zy, zw, zh = P2
+        zx0, zx1, zy0, zy1 = zone["xmin"], zone["xmax"], zone["ymin"], zone["ymax"]
+        rx0 = zx + (dx0 - zx0) / (zx1 - zx0) * zw
+        rx1 = zx + (dx1 - zx0) / (zx1 - zx0) * zw
+        ry0 = zy + (zy1 - dy1) / (zy1 - zy0) * zh
+        ry1 = zy + (zy1 - dy0) / (zy1 - zy0) * zh
+        rx0, ry0, rx1, ry1 = _clip_rect(rx0, ry0, rx1, ry1, P2)
+        dr.rectangle([rx0, ry0, rx1, ry1], outline=(235, 35, 45, 255), width=7)
+
+    # 总图上的红框：三级时标分区图范围，两级时直接标详图范围
     tx, ty, tw, th = P3
     tx0, tx1, ty0, ty1 = total["xmin"], total["xmax"], total["ymin"], total["ymax"]
+    if zone:
+        bx0, bx1, by0, by1 = zone["xmin"], zone["xmax"], zone["ymin"], zone["ymax"]
+    else:
+        bx0, bx1, by0, by1 = dx0, dx1, dy0, dy1
     corners = []
-    for xx in (zx0, zx1):
-        for yy in (zy0, zy1):
+    for xx in (bx0, bx1):
+        for yy in (by0, by1):
             u = (xx - tx0) / (tx1 - tx0)
             v = (ty1 - yy) / (ty1 - ty0)
             corners.append((v, 1 - u) if rotated else (u, v))

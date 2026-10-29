@@ -153,6 +153,8 @@ def main():
     ap.add_argument("--detail-min-m", type=float, default=None)
     ap.add_argument("--detail-max-m", type=float, default=None)
     ap.add_argument("--zone-factor", type=float, default=None, help="自动模式下分区图 = 详图 × 该系数")
+    ap.add_argument("--map-levels", type=int, choices=[2, 3], default=None,
+                    help="图册每页几级图：2=详图+总图（总图横排不旋转，默认）；3=详图+分区图+总图")
     ap.add_argument("--total-orient", choices=["tall", "wide", "auto"], default=None,
                     help="总图方向：tall=纵向旋转（旧默认），wide=横向，auto=按轨迹长轴自动")
     ap.add_argument("--total-size", default=None, help="总图输出像素，如 1000x4545 / 4545x1000")
@@ -183,6 +185,7 @@ def main():
     detail_auto = bool(pick(a, cfg, "detail_auto", False))
     scale_auto = bool(pick(a, cfg, "scale_auto", False))
     total_orient = pick(a, cfg, "total_orient", "tall")
+    map_levels = int(pick(a, cfg, "map_levels", 2))
     total_size = pick(a, cfg, "total_size", None)
     qgis_runner = pick(a, cfg, "qgis_runner", os.environ.get("QGIS_RUNNER", DEFAULT_QGIS))
     base_url = pick(a, cfg, "base_url", DEFAULT_BASE)
@@ -246,7 +249,12 @@ def main():
                 "--total-width-m", str(total_width_m),
                 "--total-orient", str(total_orient),
             ]
-            if total_size:
+            if map_levels == 2:
+                # 两级：只要详图+总图；总图按右列尺寸（2120x1440）横排渲染，不做旋转
+                cmd += ["--maps", "detail,total",
+                        "--total-size", "2120x1440",
+                        "--total-orient", "wide"]
+            elif total_size:
                 cmd += ["--total-size", str(total_size)]
             if base_url and base_url != DEFAULT_BASE:
                 cmd += ["--base-url", base_url]
