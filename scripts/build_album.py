@@ -68,18 +68,51 @@ def bbox_span(items):
     return max(xs) - min(xs), max(ys) - min(ys)
 
 
-def paginate(items, n, gap_m):
+ASPECT_A3 = 2680.0 / 1440.0   # 详图面板宽高比
+
+
+def page_span_m(items):
+    """页内照片包围盒折算成"详图所需宽度"（米），含 1.35 余量。"""
+    dx, dy = bbox_span(items)
+    return max(dx, dy * ASPECT_A3) * 1.35
+
+
+def paginate(items, n, gap_m, span_m=None):
     pages, current = [], []
     for item in items:
         if current:
             too_many = len(current) >= n
             too_far = gap_m and gap_m > 0 and haversine_m(current[-1], item) > gap_m
-            if too_many or too_far:
+            too_wide = bool(span_m) and span_m > 0 and page_span_m(current + [item]) > span_m
+            if too_many or too_far or too_wide:
                 pages.append(current)
                 current = []
         current.append(item)
     if current:
         pages.append(current)
+    return pages
+
+
+def merge_thin(pages, min_n=5, max_n=12):
+    """把照片不足 min_n 张的页并进相邻页（并完不超 max_n），避免出现"1 张照片一页"。
+
+    按页内跨度分页时，远离主簇的孤立照片会单独成页——一页 1 张既浪费版面，
+    详图还会被迫放大到很大比例。相邻页都满了就保留，至少不丢照片。
+    """
+    changed = True
+    while changed:
+        changed = False
+        for k, page in enumerate(pages):
+            if len(page) >= min_n:
+                continue
+            for tgt in (k - 1, k + 1):
+                if 0 <= tgt < len(pages) and len(pages[tgt]) + len(page) <= max_n:
+                    pages[tgt] = (pages[tgt] + page) if tgt < k else (page + pages[tgt])
+                    pages.pop(k)
+                    changed = True
+                    break
+            if changed:
+                break
     return pages
 
 
@@ -138,6 +171,8 @@ def main():
     ap.add_argument("--photos-per-page", type=int, default=None)
     ap.add_argument("--min-last", type=int, default=None, help="尾页最少张数，不足与上一页均衡")
     ap.add_argument("--page-gap-m", type=float, default=None, help="相邻照片间距超过该值时自动另起一页")
+    ap.add_argument("--page-span-m", type=float, default=None,
+                    help="页内照片包围盒跨度超过该值（米）就分页；建议 600，页内比例更稳")
     ap.add_argument("--keep-pages", action="store_true", help="保留分页临时文件和单页成果，用于调试")
     ap.add_argument("--title", default=None)
     ap.add_argument("--subtitle", default=None)
@@ -191,6 +226,8 @@ def main():
     base_url = pick(a, cfg, "base_url", DEFAULT_BASE)
     photos_per_page = int(pick(a, cfg, "photos_per_page", 12))
     page_gap_m = float(pick(a, cfg, "page_gap_m", 500.0))
+    page_span_m = pick(a, cfg, "page_span_m", None)
+    page_span_m = float(page_span_m) if page_span_m else None
     detail_margin = float(pick(a, cfg, "detail_margin", 1.35))
     detail_min_m = float(pick(a, cfg, "detail_min_m", 180.0))
     detail_max_m = float(pick(a, cfg, "detail_max_m", 900.0))
@@ -204,8 +241,9 @@ def main():
     meta_items = json.loads(meta_path.read_text(encoding="utf-8"))
     if not isinstance(meta_items, list) or not meta_items:
         raise SystemExit("meta 必须是非空 JSON 数组")
-    pages = balance_tail(paginate(meta_items, photos_per_page, page_gap_m),
-                         int(pick(a, cfg, "min_last", 4)))
+    pages = merge_thin(balance_tail(
+        paginate(meta_items, photos_per_page, page_gap_m, page_span_m),
+        int(pick(a, cfg, "min_last", 4))))
     final_pdf = Path(pick(a, cfg, "final_pdf", out_dir / "现场图册_A3.pdf")).resolve()
     if final_pdf.exists() and final_pdf.is_dir():
         raise SystemExit("--final-pdf 指向的是目录：%s" % final_pdf)

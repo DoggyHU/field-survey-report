@@ -27,5 +27,6 @@
   "scale_auto": true,
   "base_url": "https://mt1.google.com/vt/lyrs%3Ds%26x={x}%26y={y}%26z={z}",
   "keep_pages": false,
-  "map_levels": 2
+  "map_levels": 2,
+  "page_span_m": 600
 }
